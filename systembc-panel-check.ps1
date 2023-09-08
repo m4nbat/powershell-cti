@@ -3,6 +3,10 @@
 
 $choice = Read-Host 'Enter 1 to input IP address/range manually or 2 to read from ips.txt'
 
+# Counters for the summary
+$systemBCFoundCount = 0
+$cleanCount = 0
+
 # Function to test connection
 function Test-HttpConnection {
     param (
@@ -26,9 +30,11 @@ function Test-HttpConnection {
         Start-Sleep -Seconds 0
     }
     if ($success) {
-        Write-Output "Success: $url"
+        $script:systemBCFoundCount++ # Increment the counter
+        Write-Output "SystemBC Found: $url"
     } else {
-        Write-Output "Fail - no panel: $ip"
+        $script:cleanCount++ # Increment the counter
+        Write-Output "Clean: $ip"
     }
 }
 
@@ -50,9 +56,14 @@ if ($choice -eq '1') {
     $ips = Get-Content -Path .\ips.txt
     foreach ($ip in $ips) {
         Test-HttpConnection -ip $ip
-        # Introducing a delay of 2 seconds between each IP address check
-        Start-Sleep -Seconds 2
+        # Introducing a delay of 0 seconds between each IP address check
+        Start-Sleep -Seconds 0
     }
 } else {
     Write-Output 'Invalid choice'
 }
+
+# Display the summary
+Write-Output "`nSummary:"
+Write-Output "Total SystemBC Found: $systemBCFoundCount"
+Write-Output "Total Clean IPs: $cleanCount"
