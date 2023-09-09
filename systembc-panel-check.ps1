@@ -69,7 +69,9 @@ if ($choice -eq '1') {
         if ($subnetMask -eq 32) {
             Test-HttpConnection -ip $ipInput.Replace("/32", "")
         } else {
-            1..$usableIPs | ForEach-Object {
+            $startIP = [int]$ipBase[3] + 1
+            $endIP = $startIP + $usableIPs - 1
+            $startIP..$endIP | ForEach-Object {
                 $ip = "$($ipBase[0]).$($ipBase[1]).$($ipBase[2]).$_"
                 Test-HttpConnection -ip $ip
             }
@@ -82,8 +84,6 @@ if ($choice -eq '1') {
     $ips = Get-Content -Path .\ips.txt
     foreach ($ip in $ips) {
         Test-HttpConnection -ip $ip
-        # Introducing a delay of 0 seconds between each IP address check
-        Start-Sleep -Seconds 0
     }
 } elseif ($choice -eq '3') {
     # Reading IP ranges from ranges.txt
@@ -96,7 +96,9 @@ if ($choice -eq '1') {
         if ($subnetMask -eq 32) {
             Test-HttpConnection -ip $range.Replace("/32", "")
         } else {
-            1..$usableIPs | ForEach-Object {
+            $startIP = [int]$ipBase[3] + 1
+            $endIP = $startIP + $usableIPs - 1
+            $startIP..$endIP | ForEach-Object {
                 $ip = "$($ipBase[0]).$($ipBase[1]).$($ipBase[2]).$_"
                 Test-HttpConnection -ip $ip
             }
