@@ -1,11 +1,23 @@
-# Ensure you have a text file named 'ips.txt' in the same directory as this script.
-# The text file should have one IP address per line.
+# Ensure you have the necessary text files in the same directory as this script.
 
-$choice = Read-Host 'Enter 1 to input IP address/range manually or 2 to read from ips.txt'
+$choice = Read-Host 'Enter 1 to input IP address/range manually, 2 to read from ips.txt, or 3 to read from ranges.txt'
+$outputChoice = Read-Host 'Enter 1 to output to screen or 2 to output to a file'
 
 # Counters for the summary
 $systemBCFoundCount = 0
 $cleanCount = 0
+
+# Function to calculate the number of usable IPs based on subnet mask
+function Get-UsableIPs {
+    param (
+        [int]$subnetMask
+    )
+    if ($subnetMask -eq 32) {
+        return 1
+    } else {
+        return [math]::Pow(2, (32 - $subnetMask)) - 2
+    }
+}
 
 # Function to test connection
 function Test-HttpConnection {
@@ -31,10 +43,18 @@ function Test-HttpConnection {
     }
     if ($success) {
         $script:systemBCFoundCount++ # Increment the counter
-        Write-Output "SystemBC Found: $url"
+        if ($outputChoice -eq '1') {
+            Write-Output "SystemBC Found: $url"
+        } else {
+            Add-Content -Path .\output.txt -Value "SystemBC Found: $url"
+        }
     } else {
         $script:cleanCount++ # Increment the counter
-        Write-Output "Clean: $ip"
+        if ($outputChoice -eq '1') {
+            Write-Output "Clean: $ip"
+        } else {
+            Add-Content -Path .\output.txt -Value "Clean: $ip"
+        }
     }
 }
 
@@ -43,10 +63,16 @@ if ($choice -eq '1') {
     # Check if input is IP range
     if ($ipInput -match '\/') {
         $ipParts = $ipInput -split '\/'
+        $subnetMask = [int]$ipParts[1]
+        $usableIPs = Get-UsableIPs -subnetMask $subnetMask
         $ipBase = $ipParts[0] -split '\.'
-        1..254 | ForEach-Object {
-            $ip = "$($ipBase[0]).$($ipBase[1]).$($ipBase[2]).$_"
-            Test-HttpConnection -ip $ip
+        if ($subnetMask -eq 32) {
+            Test-HttpConnection -ip $ipInput.Replace("/32", "")
+        } else {
+            1..$usableIPs | ForEach-Object {
+                $ip = "$($ipBase[0]).$($ipBase[1]).$($ipBase[2]).$_"
+                Test-HttpConnection -ip $ip
+            }
         }
     } else {
         Test-HttpConnection -ip $ipInput
@@ -59,11 +85,34 @@ if ($choice -eq '1') {
         # Introducing a delay of 0 seconds between each IP address check
         Start-Sleep -Seconds 0
     }
+} elseif ($choice -eq '3') {
+    # Reading IP ranges from ranges.txt
+    $ranges = Get-Content -Path .\ranges.txt
+    foreach ($range in $ranges) {
+        $ipParts = $range -split '\/'
+        $subnetMask = [int]$ipParts[1]
+        $usableIPs = Get-UsableIPs -subnetMask $subnetMask
+        $ipBase = $ipParts[0] -split '\.'
+        if ($subnetMask -eq 32) {
+            Test-HttpConnection -ip $range.Replace("/32", "")
+        } else {
+            1..$usableIPs | ForEach-Object {
+                $ip = "$($ipBase[0]).$($ipBase[1]).$($ipBase[2]).$_"
+                Test-HttpConnection -ip $ip
+            }
+        }
+    }
 } else {
     Write-Output 'Invalid choice'
 }
 
 # Display the summary
-Write-Output "`nSummary:"
-Write-Output "Total SystemBC Found: $systemBCFoundCount"
-Write-Output "Total Clean IPs: $cleanCount"
+if ($outputChoice -eq '1') {
+    Write-Output "`nSummary:"
+    Write-Output "Total SystemBC Found: $systemBCFoundCount"
+    Write-Output "Total Clean IPs: $cleanCount"
+} else {
+    Add-Content -Path .\output.txt -Value "`nSummary:"
+    Add-Content -Path .\output.txt -Value "Total SystemBC Found: $systemBCFoundCount"
+    Add-Content -Path .\output.txt -Value "Total Clean IPs: $cleanCount"
+}
