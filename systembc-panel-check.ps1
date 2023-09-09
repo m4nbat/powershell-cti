@@ -1,25 +1,35 @@
-# Ensure you have the necessary text files in the same directory as this script.
+# Ensure you have a text file named 'ips.txt' in the same directory as this script.
+# The text file should have one IP address per line.
 
-$choice = Read-Host 'Enter 1 to input IP address/range manually, 2 to read from ips.txt, or 3 to read from ranges.txt'
-$outputChoice = Read-Host 'Enter 1 to output to screen or 2 to output to a file'
-
-# Counters for the summary
-$systemBCFoundCount = 0
-$cleanCount = 0
-
-# Function to calculate the number of usable IPs based on subnet mask
-function Get-UsableIPs {
+function ConvertToIP {
     param (
-        [int]$subnetMask
+        [long]$ipInt
     )
-    if ($subnetMask -eq 32) {
-        return 1
-    } else {
-        return [math]::Pow(2, (32 - $subnetMask)) - 2
-    }
+    $octet1 = $ipInt -band 0xFF
+    $octet2 = ($ipInt -shr 8) -band 0xFF
+    $octet3 = ($ipInt -shr 16) -band 0xFF
+    $octet4 = ($ipInt -shr 24) -band 0xFF
+    return "$octet4.$octet3.$octet2.$octet1"
 }
 
-# Function to test connection
+function ConvertToInteger {
+    param (
+        [string]$ip
+    )
+    $octets = $ip -split '\.'
+    return [long]($octets[0] -shl 24) + [long]($octets[1] -shl 16) + [long]($octets[2] -shl 8) + [long]$octets[3]
+}
+
+function GetIPRange {
+    param (
+        [string]$ipRange
+    )
+    $ip, $subnet = $ipRange -split '/'
+    $ipInt = ConvertToInteger -ip $ip
+    $subnetSize = [math]::Pow(2, (32 - [int]$subnet))
+    return $ipInt, $subnetSize
+}
+
 function Test-HttpConnection {
     param (
         [string]$ip
@@ -33,6 +43,7 @@ function Test-HttpConnection {
             $response = Invoke-WebRequest -Uri $url -TimeoutSec 1 -ErrorAction SilentlyContinue
             if ($response.StatusCode -eq 200 -and $response.BaseResponse.ResponseUri.AbsoluteUri -eq $url -and $response.Content.Contains($expectedContent)) {
                 $success = $true
+                $foundPanels += $url
                 break
             }
         } catch {
@@ -42,79 +53,54 @@ function Test-HttpConnection {
         Start-Sleep -Seconds 0
     }
     if ($success) {
-        $script:systemBCFoundCount++ # Increment the counter
-        if ($outputChoice -eq '1') {
-            Write-Output "SystemBC Found: $url"
-        } else {
-            Add-Content -Path .\output.txt -Value "SystemBC Found: $url"
-        }
+        return "SystemBC Found: $url"
     } else {
-        $script:cleanCount++ # Increment the counter
-        if ($outputChoice -eq '1') {
-            Write-Output "Clean: $ip"
-        } else {
-            Add-Content -Path .\output.txt -Value "Clean: $ip"
-        }
+        return "Clean: $ip"
     }
 }
 
-if ($choice -eq '1') {
-    $ipInput = Read-Host 'Enter IP address or IP address range'
-    # Check if input is IP range
-    if ($ipInput -match '\/') {
-        $ipParts = $ipInput -split '\/'
-        $subnetMask = [int]$ipParts[1]
-        $usableIPs = Get-UsableIPs -subnetMask $subnetMask
-        $ipBase = $ipParts[0] -split '\.'
-        if ($subnetMask -eq 32) {
-            Test-HttpConnection -ip $ipInput.Replace("/32", "")
-        } else {
-            $startIP = [int]$ipBase[3] + 1
-            $endIP = $startIP + $usableIPs - 1
-            $startIP..$endIP | ForEach-Object {
-                $ip = "$($ipBase[0]).$($ipBase[1]).$($ipBase[2]).$_"
-                Test-HttpConnection -ip $ip
-            }
-        }
-    } else {
-        Test-HttpConnection -ip $ipInput
+$choice = Read-Host 'Enter 1 to input IP address/range manually, 2 to read from ips.txt, or 3 to read from ranges.txt'
+$outputChoice = Read-Host 'Enter 1 to output to screen or 2 to output to a file'
+
+# List to store found SystemBC panels
+$foundPanels = @()
+$outputs = @()
+
+if ($choice -eq 1) {
+    $ipRange = Read-Host 'Enter IP address or IP address range'
+    $ipInt, $subnetSize = GetIPRange -ipRange $ipRange
+    for ($i = 1; $i -lt $subnetSize; $i++) {
+        $currentIP = ConvertToIP -ipInt ($ipInt + $i)
+        $outputs += Test-HttpConnection -ip $currentIP
     }
-} elseif ($choice -eq '2') {
-    # Reading IP addresses from ips.txt
-    $ips = Get-Content -Path .\ips.txt
+} elseif ($choice -eq 2) {
+    $ips = Get-Content 'ips.txt'
     foreach ($ip in $ips) {
-        Test-HttpConnection -ip $ip
+        $outputs += Test-HttpConnection -ip $ip
     }
-} elseif ($choice -eq '3') {
-    # Reading IP ranges from ranges.txt
-    $ranges = Get-Content -Path .\ranges.txt
+} elseif ($choice -eq 3) {
+    $ranges = Get-Content 'ranges.txt'
     foreach ($range in $ranges) {
-        $ipParts = $range -split '\/'
-        $subnetMask = [int]$ipParts[1]
-        $usableIPs = Get-UsableIPs -subnetMask $subnetMask
-        $ipBase = $ipParts[0] -split '\.'
-        if ($subnetMask -eq 32) {
-            Test-HttpConnection -ip $range.Replace("/32", "")
-        } else {
-            $startIP = [int]$ipBase[3] + 1
-            $endIP = $startIP + $usableIPs - 1
-            $startIP..$endIP | ForEach-Object {
-                $ip = "$($ipBase[0]).$($ipBase[1]).$($ipBase[2]).$_"
-                Test-HttpConnection -ip $ip
-            }
+        $ipInt, $subnetSize = GetIPRange -ipRange $range
+        for ($i = 1; $i -lt $subnetSize; $i++) {
+            $currentIP = ConvertToIP -ipInt ($ipInt + $i)
+            $outputs += Test-HttpConnection -ip $currentIP
         }
     }
-} else {
-    Write-Output 'Invalid choice'
 }
 
-# Display the summary
-if ($outputChoice -eq '1') {
-    Write-Output "`nSummary:"
-    Write-Output "Total SystemBC Found: $systemBCFoundCount"
-    Write-Output "Total Clean IPs: $cleanCount"
-} else {
-    Add-Content -Path .\output.txt -Value "`nSummary:"
-    Add-Content -Path .\output.txt -Value "Total SystemBC Found: $systemBCFoundCount"
-    Add-Content -Path .\output.txt -Value "Total Clean IPs: $cleanCount"
+# Display summary at the end
+$foundCount = $outputs | Where-Object { $_ -like "SystemBC Found:*" }
+$summary = "`nSummary:`nTotal SystemBC Panels Found: $($foundCount.Count)"
+if ($foundCount.Count -gt 0) {
+    $summary += "`nFound URLs:"
+    $foundCount | ForEach-Object { $summary += $_ }
+}
+$outputs += $summary
+
+if ($outputChoice -eq 1) {
+    $outputs | ForEach-Object { Write-Output $_ }
+} elseif ($outputChoice -eq 2) {
+    $outputs | Out-File 'output.txt'
+    Write-Output "Results written to output.txt"
 }
