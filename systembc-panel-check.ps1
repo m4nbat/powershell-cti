@@ -1,6 +1,3 @@
-# Ensure you have a text file named 'ips.txt' in the same directory as this script.
-# The text file should have one IP address per line.
-
 function ConvertToIP {
     param (
         [long]$ipInt
@@ -43,13 +40,11 @@ function Test-HttpConnection {
             $response = Invoke-WebRequest -Uri $url -TimeoutSec 1 -ErrorAction SilentlyContinue
             if ($response.StatusCode -eq 200 -and $response.BaseResponse.ResponseUri.AbsoluteUri -eq $url -and $response.Content.Contains($expectedContent)) {
                 $success = $true
-                $foundPanels += $url
                 break
             }
         } catch {
             # Do nothing on error
         }
-        # Introducing a delay of 0 seconds between each web request
         Start-Sleep -Seconds 0
     }
     if ($success) {
@@ -62,21 +57,27 @@ function Test-HttpConnection {
 $choice = Read-Host 'Enter 1 to input IP address/range manually, 2 to read from ips.txt, or 3 to read from ranges.txt'
 $outputChoice = Read-Host 'Enter 1 to output to screen or 2 to output to a file'
 
-# List to store found SystemBC panels
 $foundPanels = @()
-$outputs = @()
 
 if ($choice -eq 1) {
     $ipRange = Read-Host 'Enter IP address or IP address range'
     $ipInt, $subnetSize = GetIPRange -ipRange $ipRange
     for ($i = 1; $i -lt $subnetSize; $i++) {
         $currentIP = ConvertToIP -ipInt ($ipInt + $i)
-        $outputs += Test-HttpConnection -ip $currentIP
+        $result = Test-HttpConnection -ip $currentIP
+        if ($outputChoice -eq 1) {
+            Write-Output $result
+        }
+        $foundPanels += $result
     }
 } elseif ($choice -eq 2) {
     $ips = Get-Content 'ips.txt'
     foreach ($ip in $ips) {
-        $outputs += Test-HttpConnection -ip $ip
+        $result = Test-HttpConnection -ip $ip
+        if ($outputChoice -eq 1) {
+            Write-Output $result
+        }
+        $foundPanels += $result
     }
 } elseif ($choice -eq 3) {
     $ranges = Get-Content 'ranges.txt'
@@ -84,23 +85,26 @@ if ($choice -eq 1) {
         $ipInt, $subnetSize = GetIPRange -ipRange $range
         for ($i = 1; $i -lt $subnetSize; $i++) {
             $currentIP = ConvertToIP -ipInt ($ipInt + $i)
-            $outputs += Test-HttpConnection -ip $currentIP
+            $result = Test-HttpConnection -ip $currentIP
+            if ($outputChoice -eq 1) {
+                Write-Output $result
+            }
+            $foundPanels += $result
         }
     }
 }
 
 # Display summary at the end
-$foundCount = $outputs | Where-Object { $_ -like "SystemBC Found:*" }
+$foundCount = $foundPanels | Where-Object { $_ -like "SystemBC Found:*" }
 $summary = "`nSummary:`nTotal SystemBC Panels Found: $($foundCount.Count)"
 if ($foundCount.Count -gt 0) {
     $summary += "`nFound URLs:"
-    $foundCount | ForEach-Object { $summary += $_ }
+    $foundCount | ForEach-Object { $summary += "`n$_" }
 }
-$outputs += $summary
-
 if ($outputChoice -eq 1) {
-    $outputs | ForEach-Object { Write-Output $_ }
+    Write-Output $summary
 } elseif ($outputChoice -eq 2) {
-    $outputs | Out-File 'output.txt'
+    $foundPanels += $summary
+    $foundPanels | Out-File 'output.txt'
     Write-Output "Results written to output.txt"
 }
