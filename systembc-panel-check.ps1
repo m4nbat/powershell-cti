@@ -21,6 +21,10 @@ function GetIPRange {
     param (
         [string]$ipRange
     )
+    # Check if subnet mask is provided
+    if (-not ($ipRange -like "*/*")) {
+        $ipRange += "/32"
+    }
     $ip, $subnet = $ipRange -split '/'
     $ipInt = ConvertToInteger -ip $ip
     $subnetSize = [math]::Pow(2, (32 - [int]$subnet))
@@ -50,7 +54,18 @@ function Test-HttpConnection {
     if ($success) {
         return "SystemBC Found: $url"
     } else {
-        return "Clean: $ip"
+        return $null
+    }
+}
+
+function WriteToOutput {
+    param (
+        [string]$message
+    )
+    if ($outputChoice -eq 1) {
+        Write-Output $message
+    } elseif ($outputChoice -eq 2) {
+        $message | Out-File -Append 'output.txt'
     }
 }
 
@@ -62,49 +77,64 @@ $foundPanels = @()
 if ($choice -eq 1) {
     $ipRange = Read-Host 'Enter IP address or IP address range'
     $ipInt, $subnetSize = GetIPRange -ipRange $ipRange
-    for ($i = 1; $i -lt $subnetSize; $i++) {
-        $currentIP = ConvertToIP -ipInt ($ipInt + $i)
-        $result = Test-HttpConnection -ip $currentIP
-        if ($outputChoice -eq 1) {
-            Write-Output $result
-        }
-        $foundPanels += $result
+    if ($subnetSize -eq 1) { # If it's a single IP
+        $result = Test-HttpConnection -ip (ConvertToIP -ipInt $ipInt)
+        if ($result) { 
+        $foundPanels += $result 
+        WriteToOutput $result
     }
+    } else { # If it's a range
+        for ($i = 1; $i -lt $subnetSize; $i++) {
+            $currentIP = ConvertToIP -ipInt ($ipInt + $i)
+            $result = Test-HttpConnection -ip $currentIP
+            if ($result) { $foundPanels += $result }
+        }
+    }
+
 } elseif ($choice -eq 2) {
     $ips = Get-Content 'ips.txt'
     foreach ($ip in $ips) {
         $result = Test-HttpConnection -ip $ip
-        if ($outputChoice -eq 1) {
-            Write-Output $result
-        }
-        $foundPanels += $result
+        if ($result) { 
+        $foundPanels += $result 
+        WriteToOutput $result
+    }
     }
 } elseif ($choice -eq 3) {
-    $ranges = Get-Content 'ranges.txt'
-    foreach ($range in $ranges) {
-        $ipInt, $subnetSize = GetIPRange -ipRange $range
-        for ($i = 1; $i -lt $subnetSize; $i++) {
-            $currentIP = ConvertToIP -ipInt ($ipInt + $i)
-            $result = Test-HttpConnection -ip $currentIP
-            if ($outputChoice -eq 1) {
-                Write-Output $result
+    if (Test-Path 'ranges.txt') {
+        $ranges = Get-Content 'ranges.txt'
+        Write-Output "Reading from ranges.txt..."
+        foreach ($range in $ranges) {
+            Write-Output "Processing range: $range"
+            $ipInt, $subnetSize = GetIPRange -ipRange $range
+            for ($i = 1; $i -lt $subnetSize; $i++) {
+                $currentIP = ConvertToIP -ipInt ($ipInt + $i)
+                $result = Test-HttpConnection -ip $currentIP
+                if ($result) { 
+        $foundPanels += $result 
+        WriteToOutput $result
+        Write-Output "Found panel at: $currentIP"
+    }
+                     
+                    
+                
             }
-            $foundPanels += $result
         }
+    } else {
+        Write-Output "ranges.txt not found in the current directory!"
     }
 }
 
 # Display summary at the end
-$foundCount = $foundPanels | Where-Object { $_ -like "SystemBC Found:*" }
-$summary = "`nSummary:`nTotal SystemBC Panels Found: $($foundCount.Count)"
-if ($foundCount.Count -gt 0) {
-    $summary += "`nFound URLs:"
-    $foundCount | ForEach-Object { $summary += "`n$_" }
-}
+$foundCount = $foundPanels.Count
+$summary = "`nSummary:`nTotal SystemBC Panels Found: $foundCount"
+$foundPanels += $summary
+
 if ($outputChoice -eq 1) {
-    Write-Output $summary
+    $foundPanels | ForEach-Object { Write-Output $_ }
 } elseif ($outputChoice -eq 2) {
-    $foundPanels += $summary
-    $foundPanels | Out-File 'output.txt'
+    Write-Output "Writing results to file..."
+    $foundPanels | Out-File -Append 'output.txt'
+    Start-Process explorer.exe -ArgumentList (Get-Location).Path
     Write-Output "Results written to output.txt"
 }
