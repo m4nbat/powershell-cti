@@ -21,9 +21,8 @@ function GetIPRange {
     param (
         [string]$ipRange
     )
-    # Check if subnet mask is provided
-    if (-not ($ipRange -like "*/*")) {
-        $ipRange += "/32"
+    if ($ipRange -notmatch '/') {
+        $ipRange += '/32'
     }
     $ip, $subnet = $ipRange -split '/'
     $ipInt = ConvertToInteger -ip $ip
@@ -36,26 +35,20 @@ function Test-HttpConnection {
         [string]$ip
     )
     $urls = @("http://$ip/systembc/password.php", "http://$ip/www/systembc/password.php")
-    $success = $false
     $expectedContent = '<pre align=center><form method=post>Password: <input type=password name=pass><input type=submit value=">>"></form></pre>'
     
     foreach ($url in $urls) {
         try {
             $response = Invoke-WebRequest -Uri $url -TimeoutSec 1 -ErrorAction SilentlyContinue
             if ($response.StatusCode -eq 200 -and $response.BaseResponse.ResponseUri.AbsoluteUri -eq $url -and $response.Content.Contains($expectedContent)) {
-                $success = $true
-                break
+                return "SystemBC Found: $url"
             }
         } catch {
-            # Do nothing on error
+            Write-Output "Failed to connect to $url"
         }
         Start-Sleep -Seconds 0
     }
-    if ($success) {
-        return "SystemBC Found: $url"
-    } else {
-        return $null
-    }
+    return "Clean: $ip"
 }
 
 function WriteToOutput {
@@ -72,69 +65,38 @@ function WriteToOutput {
 $choice = Read-Host 'Enter 1 to input IP address/range manually, 2 to read from ips.txt, or 3 to read from ranges.txt'
 $outputChoice = Read-Host 'Enter 1 to output to screen or 2 to output to a file'
 
-$foundPanels = @()
-
 if ($choice -eq 1) {
     $ipRange = Read-Host 'Enter IP address or IP address range'
     $ipInt, $subnetSize = GetIPRange -ipRange $ipRange
-    if ($subnetSize -eq 1) { # If it's a single IP
-        $result = Test-HttpConnection -ip (ConvertToIP -ipInt $ipInt)
-        if ($result) { 
-        $foundPanels += $result 
+    for ($i = 0; $i -lt $subnetSize; $i++) {
+        $currentIP = ConvertToIP -ipInt ($ipInt + $i)
+        $result = Test-HttpConnection -ip $currentIP
         WriteToOutput $result
     }
-    } else { # If it's a range
-        for ($i = 1; $i -lt $subnetSize; $i++) {
-            $currentIP = ConvertToIP -ipInt ($ipInt + $i)
-            $result = Test-HttpConnection -ip $currentIP
-            if ($result) { $foundPanels += $result }
-        }
-    }
-
 } elseif ($choice -eq 2) {
     $ips = Get-Content 'ips.txt'
     foreach ($ip in $ips) {
         $result = Test-HttpConnection -ip $ip
-        if ($result) { 
-        $foundPanels += $result 
         WriteToOutput $result
-    }
     }
 } elseif ($choice -eq 3) {
-    if (Test-Path 'ranges.txt') {
-        $ranges = Get-Content 'ranges.txt'
-        Write-Output "Reading from ranges.txt..."
-        foreach ($range in $ranges) {
-            Write-Output "Processing range: $range"
-            $ipInt, $subnetSize = GetIPRange -ipRange $range
-            for ($i = 1; $i -lt $subnetSize; $i++) {
-                $currentIP = ConvertToIP -ipInt ($ipInt + $i)
-                $result = Test-HttpConnection -ip $currentIP
-                if ($result) { 
-        $foundPanels += $result 
-        WriteToOutput $result
-        Write-Output "Found panel at: $currentIP"
-    }
-                     
-                    
-                
-            }
+    $ranges = Get-Content 'ranges.txt'
+    foreach ($range in $ranges) {
+        $ipInt, $subnetSize = GetIPRange -ipRange $range
+        for ($i = 0; $i -lt $subnetSize; $i++) {
+            $currentIP = ConvertToIP -ipInt ($ipInt + $i)
+            $result = Test-HttpConnection -ip $currentIP
+            WriteToOutput $result
         }
-    } else {
-        Write-Output "ranges.txt not found in the current directory!"
     }
+}
+
+if ($outputChoice -eq 2) {
+    Write-Output "Results written to output.txt"
+    Start-Process explorer.exe -ArgumentList (Get-Location).Path
 }
 
 # Display summary at the end
 $foundCount = $foundPanels.Count
 $summary = "`nSummary:`nTotal SystemBC Panels Found: $foundCount"
 $foundPanels += $summary
-
-if ($outputChoice -eq 1) {
-    $foundPanels | ForEach-Object { Write-Output $_ }
-} elseif ($outputChoice -eq 2) {
-    Write-Output "Writing results to file..."
-    $foundPanels | Out-File -Append 'output.txt'
-    Start-Process explorer.exe -ArgumentList (Get-Location).Path
-    Write-Output "Results written to output.txt"
-}
